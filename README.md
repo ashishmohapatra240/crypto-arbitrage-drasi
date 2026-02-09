@@ -39,7 +39,7 @@ curl http://localhost:8080/health   # Drasi health
 
 # Step 5: Open the dashboard
 cd frontend/public
-python3 -m http.server 8000
+npx http-server -p 8000
 # Go to http://localhost:8000
 ```
 
