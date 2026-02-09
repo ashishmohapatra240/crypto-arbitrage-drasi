@@ -1,0 +1,234 @@
+id: arbitrage-server
+host: 0.0.0.0
+port: 8080
+logLevel: info
+persistConfig: true
+
+sources:
+  - kind: postgres
+    id: arbitrage-db
+    autoStart: true
+    host: arbitrage-postgres
+    port: 5432
+    database: arbitrage_db
+    user: postgres
+    password: postgres
+    tables:
+      - prices
+      - exchanges
+      - trading_pairs
+    slotName: drasi_arbitrage_slot
+    publicationName: drasi_arbitrage_pub
+    sslMode: disable
+    tableKeys:
+      - table: prices
+        keyColumns: [id]
+      - table: exchanges
+        keyColumns: [id]
+      - table: trading_pairs
+        keyColumns: [id]
+    bootstrapProvider:
+      kind: postgres
+
+queries:
+  # Arbitrage detection using foreign key relationships
+  # Detects cross-exchange price spreads with fee-adjusted profit calculation
+  - id: detect-arbitrage-opportunities
+    queryLanguage: Cypher
+    autoStart: true
+    query: |
+      MATCH (p:prices)-[:prices_exchange_id_fkey]->(e:exchanges)
+      MATCH (p)-[:prices_trading_pair_id_fkey]->(tp:trading_pairs)
+      WHERE e.is_active = true
+
+      WITH tp.symbol AS trading_pair,
+           tp.id AS pair_id,
+           COLLECT({
+             exchange: e.name,
+             price: p.price,
+             bid: p.bid,
+             ask: p.ask,
+             fee: e.trading_fee,
+             timestamp: p.timestamp
+           }) AS price_list
+
+      WITH trading_pair,
+           pair_id,
+           reduce(best = null, x IN [y IN price_list WHERE y.ask IS NOT NULL | y] |
+             CASE WHEN best IS NULL OR x.ask < best.ask THEN x ELSE best END) AS best_buy,
+           reduce(best = null, x IN [y IN price_list WHERE y.bid IS NOT NULL | y] |
+             CASE WHEN best IS NULL OR x.bid > best.bid THEN x ELSE best END) AS best_sell
+
+      WHERE best_buy IS NOT NULL
+        AND best_sell IS NOT NULL
+        AND best_buy.exchange <> best_sell.exchange
+        AND best_sell.bid > best_buy.ask
+
+      WITH trading_pair,
+           best_buy.exchange AS buy_exchange,
+           best_sell.exchange AS sell_exchange,
+           best_buy.ask AS buy_price,
+           best_sell.bid AS sell_price,
+           best_buy.fee AS buy_fee,
+           best_sell.fee AS sell_fee,
+           ((best_sell.bid - best_buy.ask) / best_buy.ask * 100.0) AS spread_percentage,
+           ((best_sell.bid * (1.0 - best_sell.fee) - best_buy.ask * (1.0 + best_buy.fee)) /
+            (best_buy.ask * (1.0 + best_buy.fee)) * 100.0) AS profit_after_fees
+
+      WHERE profit_after_fees > 0.1
+
+      RETURN
+        trading_pair,
+        buy_exchange,
+        sell_exchange,
+        buy_price,
+        sell_price,
+        spread_percentage,
+        profit_after_fees
+    sources:
+      - source_id: arbitrage-db
+
+  # Latest prices with exchange names via foreign key joins
+  - id: latest-prices-by-exchange
+    queryLanguage: Cypher
+    autoStart: true
+    query: |
+      MATCH (p:prices)-[:prices_exchange_id_fkey]->(e:exchanges)
+      MATCH (p)-[:prices_trading_pair_id_fkey]->(tp:trading_pairs)
+      WHERE e.is_active = true
+
+      RETURN
+        e.name AS exchange_name,
+        tp.symbol AS trading_pair,
+        p.price AS current_price,
+        p.bid AS best_bid,
+        p.ask AS best_ask,
+        p.volume_24h AS volume_24h,
+        p.timestamp AS last_update
+    sources:
+      - source_id: arbitrage-db
+
+  # High-value arbitrage alerts (profit > 1.0%)
+  - id: high-value-arbitrage-alerts
+    queryLanguage: Cypher
+    autoStart: true
+    query: |
+      MATCH (p:prices)-[:prices_exchange_id_fkey]->(e:exchanges)
+      MATCH (p)-[:prices_trading_pair_id_fkey]->(tp:trading_pairs)
+      WHERE e.is_active = true
+
+      WITH tp.symbol AS trading_pair,
+           tp.base_currency AS base_currency,
+           COLLECT({
+             exchange: e.name,
+             ask: p.ask,
+             bid: p.bid,
+             fee: e.trading_fee,
+             timestamp: p.timestamp
+           }) AS price_list
+
+      WITH trading_pair,
+           base_currency,
+           reduce(best = null, x IN [y IN price_list WHERE y.ask IS NOT NULL | y] |
+             CASE WHEN best IS NULL OR x.ask < best.ask THEN x ELSE best END) AS best_buy,
+           reduce(best = null, x IN [y IN price_list WHERE y.bid IS NOT NULL | y] |
+             CASE WHEN best IS NULL OR x.bid > best.bid THEN x ELSE best END) AS best_sell
+
+      WHERE best_buy IS NOT NULL
+        AND best_sell IS NOT NULL
+        AND best_buy.exchange <> best_sell.exchange
+        AND best_sell.bid > best_buy.ask
+
+      WITH trading_pair,
+           base_currency,
+           best_buy.exchange AS buy_exchange,
+           best_sell.exchange AS sell_exchange,
+           best_buy.ask AS buy_price,
+           best_sell.bid AS sell_price,
+           ((best_sell.bid * (1.0 - best_sell.fee) - best_buy.ask * (1.0 + best_buy.fee)) /
+            (best_buy.ask * (1.0 + best_buy.fee)) * 100.0) AS profit_after_fees
+
+      WHERE profit_after_fees > 1.0
+
+      RETURN
+        trading_pair,
+        base_currency,
+        buy_exchange,
+        sell_exchange,
+        buy_price,
+        sell_price,
+        profit_after_fees,
+        'HIGH_VALUE' AS alert_type
+    sources:
+      - source_id: arbitrage-db
+
+  # Simple price tracking (works without bootstrap - fallback)
+  - id: latest-prices
+    queryLanguage: Cypher
+    autoStart: true
+    query: |
+      MATCH (p:prices)
+      RETURN
+        p.id AS price_id,
+        p.exchange_id AS exchange_id,
+        p.trading_pair_id AS trading_pair_id,
+        p.price AS current_price,
+        p.bid AS best_bid,
+        p.ask AS best_ask,
+        p.volume_24h AS volume_24h,
+        p.timestamp AS last_update
+    sources:
+      - source_id: arbitrage-db
+
+  # Exchange reference data
+  - id: all-exchanges
+    queryLanguage: Cypher
+    autoStart: true
+    query: |
+      MATCH (e:exchanges)
+      RETURN
+        e.id AS id,
+        e.name AS exchange_name,
+        e.trading_fee AS fee,
+        e.is_active AS active
+    sources:
+      - source_id: arbitrage-db
+
+  # Trading pair reference data
+  - id: all-trading-pairs
+    queryLanguage: Cypher
+    autoStart: true
+    query: |
+      MATCH (tp:trading_pairs)
+      RETURN
+        tp.id AS id,
+        tp.symbol AS symbol,
+        tp.base_currency AS base,
+        tp.quote_currency AS quote
+    sources:
+      - source_id: arbitrage-db
+
+reactions:
+  - kind: sse
+    id: dashboard-sse
+    queries:
+      - detect-arbitrage-opportunities
+      - latest-prices-by-exchange
+      - high-value-arbitrage-alerts
+      - latest-prices
+      - all-exchanges
+      - all-trading-pairs
+    autoStart: true
+    host: 0.0.0.0
+    port: 8081
+    ssePath: /events
+    heartbeatIntervalMs: 15000
+
+  - kind: log
+    id: debug-log
+    queries:
+      - detect-arbitrage-opportunities
+      - latest-prices-by-exchange
+      - high-value-arbitrage-alerts
+      - latest-prices
+    autoStart: true
