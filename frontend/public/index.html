@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Arbitrage Detector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f8f9fa;
+            color: #1a1a2e;
+            padding: 24px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+
+        header {
+            padding: 32px 0;
+            margin-bottom: 32px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        h1 {
+            font-size: 1.5em;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            color: #111827;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            font-size: 0.875em;
+            margin-top: 4px;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            font-size: 0.8125em;
+            color: #6b7280;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            flex-shrink: 0;
+        }
+
+        .status-dot.active {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 968px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            overflow: hidden;
+        }
+
+        .card-header {
+            font-size: 0.8125em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6b7280;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .badge {
+            background: #f3f4f6;
+            color: #374151;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 10px 20px;
+            font-weight: 500;
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #9ca3af;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        td {
+            padding: 12px 20px;
+            border-bottom: 1px solid #f3f4f6;
+            font-size: 0.875em;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: #f9fafb;
+        }
+
+        .profit-high {
+            color: #059669;
+            font-weight: 600;
+        }
+
+        .profit-medium {
+            color: #d97706;
+            font-weight: 600;
+        }
+
+        .profit-low {
+            color: #9ca3af;
+        }
+
+        .exchange-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 500;
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 48px 20px;
+            color: #9ca3af;
+            font-size: 0.875em;
+        }
+
+        .price-cell {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8125em;
+            font-weight: 500;
+        }
+
+        .refresh-info {
+            text-align: center;
+            color: #9ca3af;
+            font-size: 0.8125em;
+            margin-top: 24px;
+        }
+
+        .arrow {
+            color: #9ca3af;
+            margin: 0 4px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 1em;
+            font-weight: 500;
+        }
+
+        .connected {
+            background: #ecfdf5;
+            color: #059669;
+        }
+
+        .disconnected {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        .connecting {
+            background: #fffbeb;
+            color: #d97706;
+        }
+
+        small {
+            color: #9ca3af;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Crypto Arbitrage Detector</h1>
+            <div class="subtitle">Real-time price monitoring via Drasi</div>
+            <div class="status">
+                <span class="status-dot active" id="status-dot"></span>
+                <span id="connection-mode">SignalR</span>
+                <span class="connection-status connecting" id="connection-status">Connecting...</span>
+                <span id="last-update"></span>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <span>Arbitrage Opportunities</span>
+                    <span class="badge" id="opp-count">0</span>
+                </div>
+                <div id="opportunities">
+                    <div class="no-data">Loading arbitrage data...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span>Latest Prices</span>
+                    <span class="badge" id="price-count">0</span>
+                </div>
+                <div id="prices">
+                    <div class="no-data">Loading price data...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="refresh-info" id="refresh-info">
+            Real-time updates via Drasi
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3001/api';
+        const SSE_URL = 'http://localhost:8081/events'; // Drasi SSE endpoint (drasi-server standalone)
+
+        let eventSource = null;
+        let fallbackInterval = null;
+        let latestPricesData = {}; // Store latest prices by key
+
+        // Update connection status indicator
+        function updateConnectionStatus(status, message) {
+            const statusElement = document.getElementById('connection-status');
+            const statusDot = document.getElementById('status-dot');
+            const modeElement = document.getElementById('connection-mode');
+
+            statusElement.className = `connection-status ${status}`;
+
+            if (status === 'connected') {
+                statusElement.textContent = 'Connected';
+                modeElement.textContent = 'Drasi SSE Live';
+                statusDot.style.background = '#10b981';
+                statusDot.classList.add('active');
+            } else if (status === 'disconnected') {
+                statusElement.textContent = message || 'Disconnected';
+                modeElement.textContent = 'REST Polling';
+                statusDot.style.background = '#dc2626';
+                statusDot.classList.remove('active');
+            } else {
+                statusElement.textContent = message || 'Connecting...';
+                modeElement.textContent = 'Drasi';
+                statusDot.style.background = '#d97706';
+                statusDot.classList.add('active');
+            }
+        }
+
+        // Render arbitrage opportunities
+        function renderOpportunities(opportunities) {
+            const count = opportunities.length;
+            document.getElementById('opp-count').textContent = count;
+
+            if (count === 0) {
+                document.getElementById('opportunities').innerHTML =
+                    '<div class="no-data">No arbitrage opportunities detected (monitoring...)</div>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pair</th>
+                            <th>Strategy</th>
+                            <th>Profit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${opportunities.map(opp => {
+                            const profitClass = opp.profit_after_fees > 1 ? 'profit-high' :
+                                opp.profit_after_fees > 0.5 ? 'profit-medium' : 'profit-low';
+                            return `
+                                <tr>
+                                    <td><strong>${opp.trading_pair}</strong></td>
+                                    <td>
+                                        <span class="exchange-badge">${opp.buy_exchange}</span>
+                                        <span class="arrow">→</span>
+                                        <span class="exchange-badge">${opp.sell_exchange}</span>
+                                        <br>
+                                        <small class="price-cell">$${parseFloat(opp.buy_price).toFixed(2)} → $${parseFloat(opp.sell_price).toFixed(2)}</small>
+                                    </td>
+                                    <td class="${profitClass} price-cell">
+                                        ${parseFloat(opp.profit_after_fees).toFixed(3)}%
+                                        <br><small>spread: ${parseFloat(opp.spread_percentage).toFixed(3)}%</small>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('opportunities').innerHTML = html;
+            document.getElementById('last-update').textContent =
+                `Updated: ${new Date().toLocaleTimeString()}`;
+        }
+
+        // Render latest prices
+        function renderPrices(prices) {
+            // Convert array to latest prices by exchange-pair key
+            if (Array.isArray(prices)) {
+                prices.forEach(price => {
+                    const key = `${price.exchange_name}_${price.trading_pair}`;
+                    latestPricesData[key] = price;
+                });
+            }
+
+            const priceArray = Object.values(latestPricesData);
+            const count = priceArray.length;
+
+            document.getElementById('price-count').textContent = count;
+
+            if (count === 0) {
+                document.getElementById('prices').innerHTML =
+                    '<div class="no-data">Waiting for price data...</div>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pair</th>
+                            <th>Exchange</th>
+                            <th>Price</th>
+                            <th>Volume 24h</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${priceArray.map(price => `
+                            <tr>
+                                <td><strong>${price.trading_pair}</strong></td>
+                                <td><span class="exchange-badge">${price.exchange_name}</span></td>
+                                <td class="price-cell">
+                                    $${parseFloat(price.current_price).toFixed(2)}
+                                    <br><small>Bid: $${parseFloat(price.best_bid || 0).toFixed(2)} | Ask: $${parseFloat(price.best_ask || 0).toFixed(2)}</small>
+                                </td>
+                                <td class="price-cell">${parseFloat(price.volume_24h || 0).toFixed(2)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('prices').innerHTML = html;
+            document.getElementById('last-update').textContent =
+                `Updated: ${new Date().toLocaleTimeString()}`;
+        }
+
+        // REST API fallback functions
+        async function fetchOpportunitiesREST() {
+            try {
+                const response = await fetch(`${API_URL}/arbitrage/opportunities?minProfit=0.1`);
+                const data = await response.json();
+                renderOpportunities(data.opportunities || []);
+            } catch (error) {
+                console.error('Error fetching opportunities:', error);
+                document.getElementById('opportunities').innerHTML =
+                    '<div class="no-data">Error loading data. Is the API running?</div>';
+            }
+        }
+
+        async function fetchPricesREST() {
+            try {
+                const response = await fetch(`${API_URL}/prices/latest`);
+                const data = await response.json();
+
+                // Transform REST API format to SignalR format
+                const transformed = data.prices.map(p => ({
+                    exchange_name: p.exchange,
+                    trading_pair: p.trading_pair,
+                    current_price: p.price,
+                    best_bid: p.bid,
+                    best_ask: p.ask,
+                    volume_24h: p.volume_24h,
+                    last_update: p.timestamp
+                }));
+
+                renderPrices(transformed);
+            } catch (error) {
+                console.error('Error fetching prices:', error);
+                document.getElementById('prices').innerHTML =
+                    '<div class="no-data">Error loading data. Is the API running?</div>';
+            }
+        }
+
+        // Initialize SSE connection to Drasi server
+        function initSSE() {
+            try {
+                updateConnectionStatus('connecting', 'Connecting to Drasi...');
+
+                // Start REST polling immediately, don't wait for SSE
+                startRESTPolling();
+
+                eventSource = new EventSource(SSE_URL);
+
+                eventSource.onopen = () => {
+                    console.log('SSE connected to Drasi server');
+                    updateConnectionStatus('connected');
+                    document.getElementById('refresh-info').textContent =
+                        'Drasi SSE connected + REST API polling every 3s';
+                };
+
+                // Handle arbitrage opportunities from Drasi
+                eventSource.addEventListener('detect-arbitrage-opportunities', (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('ARBITRAGE (SSE):', data);
+                        const results = data.addedResults || data.results || data || [];
+                        renderOpportunities(Array.isArray(results) ? results : [results]);
+                    } catch (e) {
+                        console.error('Error parsing arbitrage SSE event:', e);
+                    }
+                });
+
+                // Handle latest prices from Drasi
+                eventSource.addEventListener('latest-prices-by-exchange', (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('PRICES (SSE):', data);
+                        const results = data.addedResults || data.results || data || [];
+                        renderPrices(Array.isArray(results) ? results : [results]);
+                    } catch (e) {
+                        console.error('Error parsing prices SSE event:', e);
+                    }
+                });
+
+                // Handle high-value alerts from Drasi
+                eventSource.addEventListener('high-value-arbitrage-alerts', (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('HIGH VALUE (SSE):', data);
+                        const results = data.addedResults || data.results || data || [];
+                        renderOpportunities(Array.isArray(results) ? results : [results]);
+                    } catch (e) {
+                        console.error('Error parsing high-value SSE event:', e);
+                    }
+                });
+
+                // Handle generic messages
+                eventSource.onmessage = (event) => {
+                    console.log('SSE message:', event.data);
+                };
+
+                eventSource.onerror = (error) => {
+                    console.error('SSE connection error:', error);
+                    if (eventSource.readyState === EventSource.CLOSED) {
+                        console.log('SSE closed, falling back to REST API polling');
+                        updateConnectionStatus('disconnected', 'Standalone mode');
+                        startFallbackPolling();
+                    }
+                };
+
+            } catch (error) {
+                console.error('SSE connection failed:', error);
+                console.log('Falling back to REST API polling (every 3s)');
+                updateConnectionStatus('disconnected', 'Standalone mode');
+                startFallbackPolling();
+            }
+        }
+
+        // REST API polling - always runs for baseline data
+        function startRESTPolling() {
+            if (fallbackInterval) return; // Already running
+
+            // Initial fetch
+            fetchOpportunitiesREST();
+            fetchPricesREST();
+
+            // Poll every 3 seconds
+            fallbackInterval = setInterval(() => {
+                fetchOpportunitiesREST();
+                fetchPricesREST();
+            }, 3000);
+        }
+
+        // Fallback polling (when SSE is disconnected)
+        function startFallbackPolling() {
+            startRESTPolling();
+            document.getElementById('refresh-info').textContent =
+                'Standalone mode \u2014 polling REST API every 3s';
+        }
+
+        function stopFallbackPolling() {
+            if (fallbackInterval) {
+                clearInterval(fallbackInterval);
+                fallbackInterval = null;
+            }
+            document.getElementById('refresh-info').textContent =
+                'Real-time updates via Drasi SSE';
+        }
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            initSSE();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+            stopFallbackPolling();
+        });
+    </script>
+</body>
+
+</html>
