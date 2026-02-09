@@ -2,6 +2,9 @@
 
 A real-time system that monitors cryptocurrency prices across Binance, Coinbase, and Kraken to detect arbitrage opportunities. Built with Drasi for continuous query processing.
 
+<img width="1898" height="925" alt="image" src="https://github.com/user-attachments/assets/c67ea24b-b784-4edf-a5f4-2c4c5bfa0278" />
+
+
 ## What It Does
 
 Cryptocurrency prices vary across exchanges because of regional demand, liquidity differences, and trading fees. This creates arbitrage opportunities where you can theoretically buy on one exchange and sell on another for profit.
@@ -44,12 +47,6 @@ The demo creates a test arbitrage: buy BTC on Binance at $67,001, sell on Coinba
 
 ## How It Works
 
-```
-Exchange APIs → Price Poller → PostgreSQL → Drasi → Dashboard
-                                    ↓
-                              REST API ←┘
-```
-
 **Price Poller** connects to exchange WebSocket APIs and saves prices to PostgreSQL.
 
 **PostgreSQL** stores time-series price data with CDC enabled, which streams changes to Drasi.
@@ -65,35 +62,8 @@ Exchange APIs → Price Poller → PostgreSQL → Drasi → Dashboard
 ### System Overview
 
 The system follows an event-driven architecture with Change Data Capture at its core:
+<img width="1514" height="815" alt="image" src="https://github.com/user-attachments/assets/3ab09782-3593-4d2c-b45b-3a2097cf0e3b" />
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     CRYPTO ARBITRAGE SYSTEM                         │
-└─────────────────────────────────────────────────────────────────────┘
-
-EXTERNAL SOURCES         COLLECTION           PROCESSING         PRESENTATION
-┌──────────────┐      ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│   Binance    │      │              │    │              │    │   Frontend   │
-│  WebSocket   │──┐   │  Price       │    │   Drasi      │    │  Dashboard   │
-├──────────────┤  │   │  Poller      │    │   Server     │───→│  (Port 8000) │
-│  Coinbase    │──┼──→│  (Port 3002) │───→│ (Port 8080)  │ ↑  └──────────────┘
-│  WebSocket   │  │   │              │    │ (Port 8081)  │ │         ↑
-├──────────────┤  │   └──────────────┘    └──────────────┘ │         │
-│   Kraken     │──┘          ↓                    ↑         │         │
-│  WebSocket   │             ↓                    ↑         │   SSE   │  REST
-└──────────────┘      ┌──────────────┐           ↑         │  Live   │ Polling
-                      │  PostgreSQL  │───────────┘         │         │
-   Live Price         │  (Port 5432) │    CDC Stream       │         │
-   Streams            │              │    (WAL)            SSE       REST
-                      │  - prices    │                      │         │
-                      │  - exchanges │                      │         │
-                      │  - pairs     │                      │    ┌────────┐
-                      └──────────────┘                      └────│  API   │
-                             ↑                                   │ (3001) │
-                             └───────────────────────────────────┤        │
-                                    Direct Queries                └────────┘
-                                    (Fallback Mode)
-```
 
 ### Data Flow
 
@@ -219,7 +189,7 @@ Frontend Update (if SSE unavailable)
 - Replication slot: `drasi_arbitrage_slot`
 - Publication: `drasi_arbitrage_pub`
 
-#### Drasi Server (Rust)
+#### Drasi Server
 **Purpose:** Continuous query processor using Cypher graph queries
 
 **Responsibilities:**
@@ -362,75 +332,6 @@ bootstrapProvider:
   kind: postgres  # Load exchanges and trading_pairs on startup
 ```
 
-This enables:
-- Foreign key relationships work correctly
-- Queries have full context on first CDC event
-- No need to manually join reference data in application code
-
-#### 7. Separation of Concerns
-**Problem:** Mixing business logic (arbitrage detection) with infrastructure (CDC, streaming, caching) creates complex, brittle code.
-
-**Drasi Solution:** Clean separation:
-- **Price Poller:** Only collects prices, no business logic
-- **PostgreSQL:** Only stores data, CDC is built-in
-- **Drasi:** All arbitrage logic in declarative Cypher queries
-- **Frontend:** Only renders results, no calculations
-
-**Benefits:**
-- Arbitrage logic is in one place (server.yaml)
-- Easy to add new queries without touching application code
-- Backend services are simple and focused
-- Testing is easier (can test queries independently)
-
-#### 8. Operational Simplicity
-**Problem:** Building CDC → Query → Stream pipeline from scratch requires:
-- Custom CDC consumers
-- Query execution engine
-- Result caching layer
-- WebSocket/SSE server
-- State management
-- Reconnection logic
-
-**Drasi Solution:** All included in one Rust binary:
-- PostgreSQL CDC source (built-in)
-- Cypher query engine (built-in)
-- SSE reaction (built-in)
-- Bootstrap providers (built-in)
-- Health checks and monitoring (built-in)
-
-**Deployment:**
-- Single Docker container for Drasi
-- Configuration via YAML (no code)
-- REST API for runtime management
-- Auto-reconnection and error handling
-
-#### Real-World Impact
-
-With Drasi, this arbitrage system achieves:
-
-- **99th percentile latency:** < 500ms from price change to frontend display
-- **Zero false negatives:** Never miss an opportunity due to polling delay
-- **Resource efficient:** 1 CDC stream instead of continuous database polling
-- **Maintainable:** Arbitrage logic is declarative Cypher, not procedural code
-- **Scalable:** Add new exchanges/pairs without changing Drasi configuration
-- **Reliable:** Automatic reconnection, exactly-once CDC delivery
-
-Without Drasi, we'd need:
-- Custom CDC consumer code (100+ lines)
-- Manual query scheduling and caching
-- WebSocket server implementation
-- State reconciliation logic
-- Result delta calculation
-- Reconnection handling
-
-This would result in:
-- 3-10 second detection latency (unacceptable for arbitrage)
-- Higher infrastructure costs (continuous polling)
-- More complex codebase (harder to maintain)
-- Higher risk of bugs (more custom code)
-
-**Conclusion:** Drasi transforms a complex real-time data processing problem into a simple, declarative configuration. For use cases requiring sub-second latency, complex joins, and continuous result updates, Drasi is not just a good fit—it's the ideal solution.
-
 ## Project Structure
 
 ```
@@ -446,30 +347,12 @@ crypto-arbitrage-drasi/
 └── drasi-server/
     ├── config/server.yaml              # Drasi queries and reactions
     ├── docker-compose-standalone.yml   # Drasi launcher
-    └── README.md                       # Drasi documentation
 ```
 
 ### About Drasi Server
 
-The `drasi-server/` directory contains **only configuration files**, not the source code.
+The `drasi-server/` directory contains **only configuration files**.
 
-**What it includes:**
-- `config/server.yaml` - Your custom Cypher queries for arbitrage detection
-- `docker-compose-standalone.yml` - Docker Compose file to run Drasi
-- `README.md` - Documentation and usage instructions
-
-**Drasi Server source code:**
-- Official repository: https://github.com/drasi-project/drasi-server
-- Version: 0.1.0
-- Docker image: `ghcr.io/drasi-project/drasi-server:0.1.0` (pre-built)
-
-This project uses the **pre-built Docker image** from GitHub Container Registry. You don't need to build from source unless you want to modify Drasi itself.
-
-**To run Drasi:**
-```bash
-cd drasi-server
-docker compose -f docker-compose-standalone.yml up -d
-```
 
 See [drasi-server/README.md](drasi-server/README.md) for more details.
 
@@ -585,20 +468,6 @@ docker exec arbitrage-postgres psql -U postgres -d arbitrage_db \
   -c "SELECT cleanup_old_prices(24);"
 ```
 
-## Troubleshooting
-
-**No prices showing up**
-
-Check the price poller logs:
-```bash
-docker compose logs -f price-poller
-```
-
-You should see "WebSocket connected" messages for each exchange. If not, restart it:
-```bash
-docker compose restart price-poller
-```
-
 **No arbitrage opportunities**
 
 The system uses a 2-minute time window. If prices are older than 2 minutes, they won't be considered. Run the demo to inject fresh test data:
@@ -634,90 +503,3 @@ docker exec arbitrage-postgres psql -U postgres -d arbitrage_db \
   -c "UPDATE exchanges SET is_active = true WHERE is_active = true;"
 ```
 
-**Drasi queries not updating**
-
-Check the replication slot is active:
-```bash
-docker exec arbitrage-postgres psql -U postgres -d arbitrage_db \
-  -c "SELECT slot_name, active FROM pg_replication_slots;"
-```
-
-You should see `drasi_arbitrage_slot | t`. If it's not active, restart Drasi:
-```bash
-cd drasi-server && docker compose -f docker-compose-standalone.yml restart drasi-server
-```
-
-## Configuration
-
-All environment variables are configured in `docker-compose.yml`.
-
-Main configuration:
-- Database connection: Already in docker-compose.yml (postgres:5432, password: postgres)
-- Trading fees: Stored in database, editable via SQL
-- Time windows: 2 minutes for arbitrage detection (in services/api/src/index.ts)
-- Drasi queries: `drasi-server/config/server.yaml`
-
-The Drasi config file is important. It defines:
-- **Sources**: PostgreSQL CDC connection details
-- **Queries**: Cypher queries that run continuously
-- **Reactions**: What happens when query results change (SSE streams, logging)
-
-
-## Development
-
-**Adding a new exchange**
-
-1. Create a connector file in `services/price-poller/src/connectors/yourexchange.ts`
-2. Implement WebSocket connection and message parsing
-3. Add the exchange to the database: `INSERT INTO exchanges (name, trading_fee) VALUES ('YourExchange', 0.0020);`
-4. Register it in `services/price-poller/src/index.ts`
-5. Rebuild: `docker compose build price-poller && docker compose restart price-poller`
-
-**Running services locally**
-
-```bash
-# Start just the database
-docker compose up -d postgres
-
-# Start Drasi
-cd drasi-server && docker compose -f docker-compose-standalone.yml up -d && cd ..
-
-# Install dependencies
-cd services/price-poller && npm install
-cd ../api && npm install
-
-# Services use environment variables with sensible defaults
-# DB_HOST defaults to localhost, DB_PORT to 5432, DB_PASSWORD to postgres
-# No .env file needed for local development
-
-# Run in dev mode (separate terminals)
-cd services/price-poller && npm run dev
-cd services/api && npm run dev
-```
-
-**Creating custom Drasi queries**
-
-Edit `drasi-server/config/server.yaml` and add a query:
-
-```yaml
-queries:
-  - id: my-custom-query
-    queryLanguage: Cypher
-    autoStart: true
-    query: |
-      MATCH (p:prices)
-      WHERE p.price > 70000
-      RETURN p.price
-    sources:
-      - source_id: arbitrage-db
-```
-
-Then restart: `cd drasi-server && docker compose -f docker-compose-standalone.yml restart drasi-server`
-
-## Important Notes
-
-- Trading fees are crucial for realistic profit calculations. The default fees might not match current exchange rates.
-- This system detects opportunities but doesn't execute trades. Actually profiting from arbitrage requires fast execution, good liquidity, and account balances on multiple exchanges.
-- The 2-minute time window means stale opportunities automatically disappear.
-- Drasi needs the `bootstrapProvider` setting in server.yaml for queries that use foreign keys. Without it, only simple queries work.
-- Prices are automatically cleaned up after 24 hours to save space.
