@@ -1,0 +1,26 @@
+# Drasi Server - Standalone Configuration
+# This connects to the existing arbitrage PostgreSQL database
+# instead of creating its own PostgreSQL instance
+
+name: drasi-server-standalone
+
+services:
+  drasi-server:
+    image: ${DRASI_SERVER_IMAGE:-ghcr.io/drasi-project/drasi-server:0.1.0}
+    container_name: drasi-server-standalone
+    ports:
+      - "8080:8080"    # REST API
+      - "8081:8081"    # SSE reactions
+    volumes:
+      - ./config:/app/config:rw
+    environment:
+      - RUST_LOG=${LOG_LEVEL:-info}
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+    restart: unless-stopped
+    networks:
+      - crypto-arbitrage-drasi_arbitrage-network
+
+networks:
+  crypto-arbitrage-drasi_arbitrage-network:
+    external: true
