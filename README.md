@@ -19,7 +19,7 @@ The system accounts for trading fees when calculating potential profit.
 
 ## Quick Start
 
-You need Docker and Docker Compose installed, plus 8GB RAM minimum.
+You need Docker and Docker Compose installed
 
 ```bash
 # Step 1: Start main services (PostgreSQL, API, Price Poller)
